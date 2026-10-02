@@ -1,0 +1,15 @@
+[package]
+name = "game-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+xiangqi-core.workspace = true
+xiangqi-search.workspace = true
+llm-engine.workspace = true
+pikafish-adapter.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "默认能力：仅核心窗口/事件/IPC，最小权限",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

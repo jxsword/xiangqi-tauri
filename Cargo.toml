@@ -1,0 +1,31 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/xiangqi-core",
+    "crates/xiangqi-search",
+    "crates/llm-engine",
+    "crates/pikafish-adapter",
+    "crates/game-core",
+    "crates/game-store",
+    "src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+authors = ["XiangQi Dev Team"]
+
+[workspace.dependencies]
+xiangqi-core = { path = "crates/xiangqi-core" }
+xiangqi-search = { path = "crates/xiangqi-search" }
+llm-engine = { path = "crates/llm-engine" }
+pikafish-adapter = { path = "crates/pikafish-adapter" }
+game-core = { path = "crates/game-core" }
+game-store = { path = "crates/game-store" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "time", "process", "io-util", "sync"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

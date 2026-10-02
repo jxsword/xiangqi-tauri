@@ -1,0 +1,10 @@
+[package]
+name = "pikafish-adapter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+xiangqi-core.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

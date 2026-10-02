@@ -1,0 +1,33 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
+src-tauri/gen/android/
+src-tauri/gen/apple/
+
+# 皮卡鱼二进制（体积大，由脚本获取，不提交）
+src-tauri/resources/pikafish/*/
+!src-tauri/resources/pikafish/README.md
+
+# 本地密钥/配置
+*.key
+settings.local.json
