@@ -68,7 +68,7 @@ fn game_ended_blocks_further_moves() {
     // 直接构造终局再走一步应报错
     let mut g2 = Game::new(fen, GameMode::HumanVsMachine, None, None).unwrap();
     // 黑方已无合法着；红方若引擎代走也因已结束而报错
-    let ev = g2.machine_move(&EngineManager, EngineOptions::default());
+    let ev = g2.machine_move(&EngineManager::default(), EngineOptions::default());
     assert!(ev.is_err(), "对局结束后不应再有走子");
     let _ = g;
 }
@@ -110,7 +110,7 @@ fn human_vs_machine_turn_cycle() {
     assert!(!g.is_human_turn());
     // 引擎走黑（内置深度1）
     let (ev, source, fb) = g
-        .machine_move(&EngineManager, EngineOptions::default())
+        .machine_move(&EngineManager::default(), EngineOptions::default())
         .unwrap();
     assert!(matches!(source, EngineId::Builtin { .. }));
     assert!(fb.is_none());
@@ -125,7 +125,7 @@ fn human_vs_machine_turn_cycle() {
 fn machine_vs_machine_full_game() {
     // 机器对战：浅深度引擎互弈，直至终局或步数上限
     let mut g = machine_vs_machine();
-    let manager = EngineManager;
+    let manager = EngineManager::default();
     let opts = EngineOptions { think_ms: 0 };
     let mut steps = 0u32;
     let max_steps = 200;
@@ -162,7 +162,7 @@ fn machine_vs_machine_full_game() {
 fn machine_move_requires_engine_side() {
     // 人走方（红方为人）调用 machine_move 应报错
     let mut g = human_vs_machine();
-    let r = g.machine_move(&EngineManager, EngineOptions::default());
+    let r = g.machine_move(&EngineManager::default(), EngineOptions::default());
     assert!(r.is_err());
 }
 
@@ -186,11 +186,40 @@ fn builtin_engine_no_legal_move() {
 
 #[test]
 fn engine_manager_creates_adapters() {
-    let m = EngineManager;
+    let m = EngineManager::default();
     let e = m.create(EngineId::Builtin { depth: 3 });
     assert!(matches!(e.id(), EngineId::Builtin { depth: 3 }));
     let e2 = m.create(EngineId::Llm);
     assert!(matches!(e2.id(), EngineId::Llm));
     let e3 = m.create(EngineId::Pikafish);
     assert!(matches!(e3.id(), EngineId::Pikafish));
+}
+
+#[test]
+fn llm_unconfigured_reports_error() {
+    // 默认 EngineManager 无大模型配置：Llm 引擎应报配置错误而非崩溃
+    let m = EngineManager::default();
+    let mut e = m.create(EngineId::Llm);
+    let b = xiangqi_core::board::Board::start_position();
+    let err = e.best_move(&b, EngineOptions::default()).unwrap_err();
+    assert!(err.to_string().contains("未配置大模型"), "{err}");
+}
+
+#[test]
+fn llm_falls_back_to_builtin_when_unreachable() {
+    // 配置指向不可达端点 → propose_move 失败 → 降级内置引擎并给出原因
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    drop(listener); // 立即关闭端口 → 连接拒绝
+    let cfg = llm_engine::LlmConfig::new(format!("http://{addr}"), "k", "m");
+    let mut e = game_core::LlmEngineAdapter::new(cfg, 2);
+    let b = xiangqi_core::board::Board::start_position();
+    let out = e.best_move(&b, EngineOptions::default()).unwrap();
+    assert!(b.legal_moves().contains(&out.mv), "降级着法必须合法");
+    assert!(
+        matches!(out.source, EngineId::Builtin { .. }),
+        "降级来源应为内置引擎"
+    );
+    let reason = out.fallback_reason.expect("必须带降级原因");
+    assert!(reason.contains("内置引擎"), "{reason}");
 }

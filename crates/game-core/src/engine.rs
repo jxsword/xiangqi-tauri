@@ -106,9 +106,21 @@ impl Engine for BuiltinEngineAdapter {
     }
 }
 
-/// 大模型引擎适配（M6 实现；当前返回未接入错误）
+/// 大模型引擎适配：LLM 提议 → 合法性已由客户端校验；失败/超时/非法着降级内置引擎
 #[derive(Debug, Clone)]
-pub struct LlmEngineAdapter;
+pub struct LlmEngineAdapter {
+    client: llm_engine::LlmClient,
+    fallback_depth: u8,
+}
+
+impl LlmEngineAdapter {
+    pub fn new(config: llm_engine::LlmConfig, fallback_depth: u8) -> Self {
+        LlmEngineAdapter {
+            client: llm_engine::LlmClient::new(config),
+            fallback_depth: fallback_depth.max(1),
+        }
+    }
+}
 
 impl Engine for LlmEngineAdapter {
     fn id(&self) -> EngineId {
@@ -119,10 +131,54 @@ impl Engine for LlmEngineAdapter {
     }
     fn best_move(
         &mut self,
+        board: &Board,
+        opts: EngineOptions,
+    ) -> Result<EngineOutcome, EngineError> {
+        if board.legal_moves().is_empty() {
+            return Err(EngineError::NoLegalMove);
+        }
+        match self.client.propose_move_sync(board) {
+            Ok(mv) => Ok(EngineOutcome {
+                mv,
+                source: EngineId::Llm,
+                fallback_reason: None,
+            }),
+            Err(e) => {
+                // 降级：内置引擎兜底（永不走非法着）
+                let reason = format!("大模型不可用（{e}），已由内置引擎走子");
+                let mut fb = BuiltinEngineAdapter::new(self.fallback_depth);
+                let out = fb.best_move(board, opts)?;
+                Ok(EngineOutcome {
+                    mv: out.mv,
+                    source: EngineId::Builtin {
+                        depth: self.fallback_depth,
+                    },
+                    fallback_reason: Some(reason),
+                })
+            }
+        }
+    }
+}
+
+/// 大模型未配置时的占位适配器（提示配置）
+#[derive(Debug, Clone)]
+pub struct LlmUnconfiguredAdapter;
+
+impl Engine for LlmUnconfiguredAdapter {
+    fn id(&self) -> EngineId {
+        EngineId::Llm
+    }
+    fn name(&self) -> String {
+        "大模型引擎（未配置）".to_string()
+    }
+    fn best_move(
+        &mut self,
         _board: &Board,
         _opts: EngineOptions,
     ) -> Result<EngineOutcome, EngineError> {
-        Err(EngineError::EngineFailed("大模型引擎尚未接入（M6）".into()))
+        Err(EngineError::EngineFailed(
+            "未配置大模型，请在设置中填写 base_url / api_key / model".into(),
+        ))
     }
 }
 
@@ -146,15 +202,32 @@ impl Engine for PikafishEngineAdapter {
     }
 }
 
-/// 引擎管理：按 EngineId 创建实例
+/// 引擎管理：按 EngineId 创建实例（持有大模型配置）
 #[derive(Debug, Clone, Default)]
-pub struct EngineManager;
+pub struct EngineManager {
+    llm: Option<llm_engine::LlmConfig>,
+}
 
 impl EngineManager {
+    pub fn new(llm: Option<llm_engine::LlmConfig>) -> Self {
+        EngineManager { llm }
+    }
+
+    pub fn set_llm(&mut self, config: Option<llm_engine::LlmConfig>) {
+        self.llm = config;
+    }
+
+    pub fn llm_config(&self) -> Option<&llm_engine::LlmConfig> {
+        self.llm.as_ref()
+    }
+
     pub fn create(&self, id: EngineId) -> Box<dyn Engine> {
         match id {
             EngineId::Builtin { depth } => Box::new(BuiltinEngineAdapter::new(depth)),
-            EngineId::Llm => Box::new(LlmEngineAdapter),
+            EngineId::Llm => match &self.llm {
+                Some(cfg) => Box::new(LlmEngineAdapter::new(cfg.clone(), 4)),
+                None => Box::new(LlmUnconfiguredAdapter),
+            },
             EngineId::Pikafish => Box::new(PikafishEngineAdapter),
         }
     }

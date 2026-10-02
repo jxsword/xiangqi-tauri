@@ -6,7 +6,7 @@ pub mod model;
 
 pub use engine::{
     BuiltinEngineAdapter, Engine, EngineError, EngineId, EngineManager, EngineOptions,
-    EngineOutcome,
+    EngineOutcome, LlmEngineAdapter, LlmUnconfiguredAdapter, PikafishEngineAdapter,
 };
 pub use game::{Game, GameError, GameEvent};
 pub use model::{EngineConfig, EngineKind, GameMode, GameResult};
