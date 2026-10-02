@@ -7,11 +7,11 @@ use xiangqi_search::search::BuiltinEngine;
 use xiangqi_search::Evaluator;
 
 /// 将死局面（黑将被困，轮黑）：黑将 e9；红车 d9 将军（d8 车保护）、
-/// 红车 d8 控 e8/f8、红马 g7 控 f9/e8/h9 → 黑将无合法着
-const MATE_FEN_BLACK_MOVES: &str = "3Rk4/3R5/6N2/9/9/9/9/9/9/4K4 b";
+/// 红车 d8 控 e8/f8、红马 g7 控 f9/e8、e5 兵遮将帅视线 → 黑将无合法着
+const MATE_FEN_BLACK_MOVES: &str = "3Rk4/3R5/6N2/9/9/4P4/9/9/9/4K4 b";
 
 /// 同棋形轮红：红方保持杀形，搜索应判红方接近必胜
-const MATE_FEN_RED_MOVES: &str = "3Rk4/3R5/6N2/9/9/9/9/9/9/4K4 w";
+const MATE_FEN_RED_MOVES: &str = "3Rk4/3R5/6N2/9/9/4P4/9/9/9/4K4 w";
 
 #[test]
 fn determinism_same_position_same_move() {
