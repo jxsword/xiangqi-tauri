@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "中国象棋",
+  "productName": "xiangqi",
   "mainBinaryName": "xiangqi",
   "version": "0.1.0",
   "identifier": "com.xiangqi.app",
