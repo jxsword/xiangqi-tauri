@@ -24,10 +24,17 @@ const RESULT_TEXT: Record<string, string> = {
   red_win: "红方胜",
   black_win: "黑方胜",
   draw: "和棋",
+  aborted: "已停止",
 };
 
 export default function App() {
   const [view, setView] = useState<GameView | null>(null);
+  const viewRef = useRef<GameView | null>(null);
+  // 机器下棋控制：暂停/继续/停止（ref 供异步循环即时读取）
+  const [paused, setPaused] = useState(false);
+  const [stopped, setStopped] = useState(false);
+  const pausedRef = useRef(false);
+  const stoppedRef = useRef(false);
   const [mode, setMode] = useState("human_vs_machine");
   const [redEngine, setRedEngine] = useState("builtin");
   const [blackEngine, setBlackEngine] = useState("llm");
@@ -48,32 +55,38 @@ export default function App() {
     api.listSaves().then(setSaves).catch(showErr);
   }, []);
 
-  // 机器轮次自动推进（人机：黑方机器走完即停；机器对战：直至终局）
-  const driveIfMachine = useCallback(async (v: GameView) => {
+  // 机器轮次单步推进：每步后检查暂停/停止标志，形成可中断链
+  // （人机：黑方机器走完即停；机器对战：直至终局；暂停/停止随时生效）
+  const driveMachineStep = useCallback(async () => {
+    if (busyRef.current || pausedRef.current || stoppedRef.current) return;
+    const v = viewRef.current;
     if (!v || v.result || v.canHumanMove) return;
-    if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
+    let next: GameView | null = null;
     try {
-      for (let i = 0; i < 200; i++) {
-        const next = await api.machineStep(speedRef.current.thinkMs);
-        setView(next);
-        if (next.result || next.canHumanMove) break;
-      }
+      next = await api.machineStep(speedRef.current.thinkMs);
+      setView(next);
+      viewRef.current = next;
     } catch (e) {
       showErr(e);
+      return; // 走子失败不自动续走
     } finally {
       busyRef.current = false;
       setBusy(false);
+    }
+    if (next && !next.result && !next.canHumanMove && !pausedRef.current && !stoppedRef.current) {
+      window.setTimeout(driveMachineStep, 30);
     }
   }, []);
 
   const applyView = useCallback(
     (v: GameView) => {
       setView(v);
-      void driveIfMachine(v);
+      viewRef.current = v;
+      void driveMachineStep();
     },
-    [driveIfMachine]
+    [driveMachineStep]
   );
 
   // 启动：自动恢复上次对局 + 载入配置/存档列表
@@ -96,7 +109,40 @@ export default function App() {
   const engineArg = (e: string) =>
     e === "builtin" ? `builtin:${speedRef.current.depth}` : e;
 
+  const resetControl = () => {
+    pausedRef.current = false;
+    stoppedRef.current = false;
+    setPaused(false);
+    setStopped(false);
+  };
+
+  const handlePause = () => {
+    pausedRef.current = true;
+    setPaused(true);
+  };
+
+  const handleResume = () => {
+    pausedRef.current = false;
+    setPaused(false);
+    void driveMachineStep();
+  };
+
+  const handleStop = async () => {
+    stoppedRef.current = true;
+    pausedRef.current = false;
+    setPaused(false);
+    setStopped(true);
+    try {
+      const v = await api.abortGame();
+      setView(v);
+      viewRef.current = v;
+    } catch (e) {
+      showErr(e);
+    }
+  };
+
   const handleNewGame = () => {
+    resetControl();
     setBusy(true);
     api
       .newGame(mode, engineArg(redEngine), engineArg(blackEngine))
@@ -123,6 +169,7 @@ export default function App() {
   };
 
   const handleLoad = (slot: number) => {
+    resetControl();
     api
       .loadSlot(slot)
       .then(applyView)
@@ -252,6 +299,23 @@ export default function App() {
             {view.lastReason && (
               <div style={{ color: "#ffb35c", fontSize: 13, marginTop: 4 }}>⚠ {view.lastReason}</div>
             )}
+          </div>
+        )}
+
+        {view && !view.result && !stopped && (
+          <div style={{ marginTop: 8 }}>
+            {!paused ? (
+              <button onClick={handlePause} style={miniBtn}>
+                暂停
+              </button>
+            ) : (
+              <button onClick={handleResume} style={miniBtn}>
+                继续
+              </button>
+            )}{" "}
+            <button onClick={handleStop} style={miniBtn}>
+              停止
+            </button>
           </div>
         )}
 

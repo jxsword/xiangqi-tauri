@@ -13,6 +13,9 @@ export const api = {
   machineStep(thinkMs?: number): Promise<GameView> {
     return invoke<GameView>("machine_step", { thinkMs });
   },
+  abortGame(): Promise<GameView> {
+    return invoke<GameView>("abort_game");
+  },
   listSaves(): Promise<SaveSummary[]> {
     return invoke<SaveSummary[]>("list_saves");
   },

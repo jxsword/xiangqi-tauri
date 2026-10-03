@@ -6,8 +6,8 @@ export interface GameView {
   sideToMove: "red" | "black";
   /** playing | checkmate | stalemate | draw */
   status: "playing" | "checkmate" | "stalemate" | "draw";
-  /** red_win | black_win | draw | null */
-  result: "red_win" | "black_win" | "draw" | null;
+  /** red_win | black_win | draw | aborted | null */
+  result: "red_win" | "black_win" | "draw" | "aborted" | null;
   lastMove: string | null;
   /** 大模型降级原因（null=正常） */
   lastReason: string | null;
