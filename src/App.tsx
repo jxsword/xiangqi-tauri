@@ -189,7 +189,7 @@ export default function App() {
             style={inputStyle}
           >
             {MODES.map((m) => (
-              <option key={m.value} value={m.value}>
+              <option key={m.value} value={m.value} style={optionStyle}>
                 {m.label}
               </option>
             ))}
@@ -201,7 +201,7 @@ export default function App() {
               红方引擎
               <select value={redEngine} onChange={(e) => setRedEngine(e.target.value)} style={inputStyle}>
                 {ENGINES.map((m) => (
-                  <option key={m.value} value={m.value}>
+                  <option key={m.value} value={m.value} style={optionStyle}>
                     {m.label}
                   </option>
                 ))}
@@ -211,7 +211,7 @@ export default function App() {
               黑方引擎
               <select value={blackEngine} onChange={(e) => setBlackEngine(e.target.value)} style={inputStyle}>
                 {ENGINES.map((m) => (
-                  <option key={m.value} value={m.value}>
+                  <option key={m.value} value={m.value} style={optionStyle}>
                     {m.label}
                   </option>
                 ))}
@@ -223,7 +223,7 @@ export default function App() {
             对手引擎
             <select value={blackEngine} onChange={(e) => setBlackEngine(e.target.value)} style={inputStyle}>
               {ENGINES.map((m) => (
-                <option key={m.value} value={m.value}>
+                <option key={m.value} value={m.value} style={optionStyle}>
                   {m.label}
                 </option>
               ))}
@@ -235,7 +235,7 @@ export default function App() {
           引擎速度（内置引擎）
           <select value={speed} onChange={(e) => setSpeed(e.target.value)} disabled={busy} style={inputStyle}>
             {SPEEDS.map((s) => (
-              <option key={s.value} value={s.value}>
+              <option key={s.value} value={s.value} style={optionStyle}>
                 {s.label}
               </option>
             ))}
@@ -375,7 +375,13 @@ const inputStyle: React.CSSProperties = {
   border: "1px solid #7a5a3a",
   background: "#1f150c",
   color: "#f0e6d2",
+  colorScheme: "dark",
   fontSize: 14,
+};
+
+const optionStyle: React.CSSProperties = {
+  background: "#1f150c",
+  color: "#f0e6d2",
 };
 
 const btnStyle: React.CSSProperties = {
