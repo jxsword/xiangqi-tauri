@@ -20,21 +20,25 @@ export function pointToUcci(p: Point): string {
 /** FEN 棋盘段 → 9×10 棋子表（显示用），item=null 空位 */
 export type PieceCell = { kind: string; color: "red" | "black" } | null;
 
+/**
+ * FEN 棋子字符映射（与 Rust xiangqi_core::board 约定一致）：
+ * 大写 = 红方（帅仕相马车炮兵），小写 = 黑方（将士象马车炮卒）
+ */
 const FEN_PIECE: Record<string, { kind: string; color: "red" | "black" }> = {
-  r: { kind: "车", color: "red" },
-  n: { kind: "马", color: "red" },
-  b: { kind: "相", color: "red" },
-  a: { kind: "仕", color: "red" },
-  k: { kind: "帅", color: "red" },
-  c: { kind: "炮", color: "red" },
-  p: { kind: "兵", color: "red" },
-  R: { kind: "车", color: "black" },
-  N: { kind: "马", color: "black" },
-  B: { kind: "象", color: "black" },
-  A: { kind: "士", color: "black" },
-  K: { kind: "将", color: "black" },
-  C: { kind: "炮", color: "black" },
-  P: { kind: "卒", color: "black" },
+  R: { kind: "车", color: "red" },
+  N: { kind: "马", color: "red" },
+  B: { kind: "相", color: "red" },
+  A: { kind: "仕", color: "red" },
+  K: { kind: "帅", color: "red" },
+  C: { kind: "炮", color: "red" },
+  P: { kind: "兵", color: "red" },
+  r: { kind: "车", color: "black" },
+  n: { kind: "马", color: "black" },
+  b: { kind: "象", color: "black" },
+  a: { kind: "士", color: "black" },
+  k: { kind: "将", color: "black" },
+  c: { kind: "炮", color: "black" },
+  p: { kind: "卒", color: "black" },
 };
 
 /**
