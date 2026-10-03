@@ -101,7 +101,16 @@ fn engine_config_from_str(s: &str) -> Result<EngineConfig, String> {
         "builtin" => Ok(EngineConfig::builtin(3)),
         "llm" => Ok(EngineConfig::llm()),
         "pikafish" => Ok(EngineConfig::pikafish()),
-        _ => Err(format!("未知引擎：{s}（支持 builtin/llm/pikafish）")),
+        s if s.starts_with("builtin:") => {
+            let d: u8 = s[8..]
+                .parse()
+                .map_err(|_| format!("内置引擎深度非法：{s}"))?;
+            if !(1..=6).contains(&d) {
+                return Err(format!("内置引擎深度需在 1..=6：{s}"));
+            }
+            Ok(EngineConfig::builtin(d))
+        }
+        _ => Err(format!("未知引擎：{s}（支持 builtin[:1..=6]/llm/pikafish）")),
     }
 }
 
@@ -195,6 +204,15 @@ pub fn new_game(
         None
     } else {
         Some(engine_id_from_cfg(&engine_config_from_str(&black_engine)?))
+    };
+    // 按模式强制引擎归属：人机对战红方由人走；机器对战缺省补内置引擎
+    let (red, black) = match mode_enum {
+        GameMode::HumanVsMachine => (None, black),
+        GameMode::MachineVsMachine => (
+            red.or(Some(EngineId::Builtin { depth: 3 })),
+            black.or(Some(EngineId::Builtin { depth: 3 })),
+        ),
+        GameMode::HumanVsHuman => (None, None),
     };
     let g = Game::new(
         "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",

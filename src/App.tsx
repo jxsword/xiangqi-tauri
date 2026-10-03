@@ -14,6 +14,12 @@ const MODES = [
   { value: "machine_vs_machine", label: "机器对战" },
 ];
 
+const SPEEDS = [
+  { value: "fast", label: "快速（深度 2）", depth: 2, thinkMs: 200 },
+  { value: "normal", label: "标准（深度 3）", depth: 3, thinkMs: 800 },
+  { value: "deep", label: "深度思考（深度 6）", depth: 6, thinkMs: 5000 },
+];
+
 const RESULT_TEXT: Record<string, string> = {
   red_win: "红方胜",
   black_win: "黑方胜",
@@ -25,6 +31,11 @@ export default function App() {
   const [mode, setMode] = useState("human_vs_machine");
   const [redEngine, setRedEngine] = useState("builtin");
   const [blackEngine, setBlackEngine] = useState("llm");
+  const [speed, setSpeed] = useState("normal");
+  const speedRef = useRef<{ depth: number; thinkMs: number }>(SPEEDS[1]);
+  useEffect(() => {
+    speedRef.current = SPEEDS.find((s) => s.value === speed) ?? SPEEDS[1];
+  }, [speed]);
   const [saves, setSaves] = useState<SaveSummary[]>([]);
   const [llmCfg, setLlmCfg] = useState<LlmConfigView | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -45,7 +56,7 @@ export default function App() {
     setBusy(true);
     try {
       for (let i = 0; i < 200; i++) {
-        const next = await api.machineStep(300);
+        const next = await api.machineStep(speedRef.current.thinkMs);
         setView(next);
         if (next.result || next.canHumanMove) break;
       }
@@ -82,10 +93,13 @@ export default function App() {
     refreshSaves();
   }, [applyView, refreshSaves]);
 
+  const engineArg = (e: string) =>
+    e === "builtin" ? `builtin:${speedRef.current.depth}` : e;
+
   const handleNewGame = () => {
     setBusy(true);
     api
-      .newGame(mode, redEngine, blackEngine)
+      .newGame(mode, engineArg(redEngine), engineArg(blackEngine))
       .then(applyView)
       .catch(showErr)
       .finally(() => setBusy(false));
@@ -216,6 +230,17 @@ export default function App() {
             </select>
           </label>
         )}
+
+        <label>
+          引擎速度（内置引擎）
+          <select value={speed} onChange={(e) => setSpeed(e.target.value)} disabled={busy} style={inputStyle}>
+            {SPEEDS.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <button onClick={handleNewGame} disabled={busy} style={btnStyle}>
           {view ? "重新开局" : "新建对局"}
