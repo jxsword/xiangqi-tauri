@@ -129,12 +129,9 @@ export default function App() {
       .catch(showErr);
   };
 
-  const handleSetLlm = (baseUrl: string, apiKey: string, model: string) => {
-    api
-      .setLlmConfig(baseUrl, apiKey, model)
-      .then(() => api.getLlmConfig())
-      .then(setLlmCfg)
-      .catch(showErr);
+  const handleSetLlm = async (baseUrl: string, apiKey: string, model: string, timeoutSecs: number) => {
+    await api.setLlmConfig(baseUrl.trim(), apiKey.trim(), model.trim(), timeoutSecs);
+    setLlmCfg(await api.getLlmConfig());
   };
 
   const statusText = (v: GameView) => {
@@ -310,17 +307,43 @@ function LlmPanel({
   onSave,
 }: {
   cfg: LlmConfigView | null;
-  onSave: (baseUrl: string, apiKey: string, model: string) => void;
+  onSave: (baseUrl: string, apiKey: string, model: string, timeoutSecs: number) => Promise<void>;
 }) {
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [timeoutSecs, setTimeoutSecs] = useState(30);
+  const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+
+  const showNotice = (kind: "ok" | "err", text: string) => {
+    setNotice({ kind, text });
+    window.setTimeout(() => setNotice(null), 6000);
+  };
+
+  const handleSave = async () => {
+    try {
+      await onSave(baseUrl, apiKey, model, timeoutSecs);
+      showNotice("ok", "配置已保存（应用数据目录），下次启动自动恢复");
+    } catch (e) {
+      showNotice("err", `保存失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const handleTest = async () => {
+    try {
+      const msg = await api.testLlmConfig(baseUrl.trim(), apiKey.trim(), model.trim(), timeoutSecs);
+      showNotice("ok", msg);
+    } catch (e) {
+      showNotice("err", `连接失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
 
   useEffect(() => {
     if (cfg && !dirty) {
       setBaseUrl(cfg.baseUrl);
       setModel(cfg.model);
+      setTimeoutSecs(cfg.timeoutSecs);
     }
   }, [cfg, dirty]);
 
@@ -342,7 +365,7 @@ function LlmPanel({
           value={apiKey}
           onChange={(e) => { setApiKey(e.target.value); setDirty(true); }}
           type="password"
-          placeholder="sk-..."
+          placeholder={cfg?.apiKeyMasked ? "已保存，无需重复输入（如需更换再填写）" : "sk-..."}
           style={inputStyle}
         />
       </label>
@@ -355,9 +378,37 @@ function LlmPanel({
           style={inputStyle}
         />
       </label>
-      <button onClick={() => onSave(baseUrl, apiKey, model)} style={btnStyle}>
+      <label>
+        超时秒数（大模型响应上限）
+        <input
+          value={timeoutSecs}
+          onChange={(e) => {
+            setTimeoutSecs(Number(e.target.value) || 30);
+            setDirty(true);
+          }}
+          type="number"
+          min={5}
+          max={120}
+          style={inputStyle}
+        />
+      </label>
+      <button onClick={handleSave} style={btnStyle}>
         保存配置
+      </button>{" "}
+      <button onClick={handleTest} style={miniBtn}>
+        测试连接
       </button>
+      {notice && (
+        <div
+          style={{
+            color: notice.kind === "ok" ? "#7fd18c" : "#ff8a80",
+            fontSize: 13,
+            marginTop: 6,
+          }}
+        >
+          {notice.text}
+        </div>
+      )}
       <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
         超时 10 秒；请求失败/超时/非法着将自动降级为内置引擎
       </div>

@@ -25,7 +25,7 @@ pub struct LlmConfig {
 }
 
 fn default_timeout() -> u32 {
-    10
+    30
 }
 fn default_temperature() -> f32 {
     0.2
@@ -79,6 +79,12 @@ struct ChatRequest {
     messages: Vec<Message>,
     temperature: f32,
     max_tokens: u32,
+    /// 流式返回（SSE）：响应头即时返回，显著降低首 token 等待；
+    /// 服务端不支持流式时会回退普通 JSON
+    stream: bool,
+    /// qwen3 系列：关闭思考链，避免长推理拖慢响应并占满 max_tokens
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enable_thinking: Option<bool>,
 }
 
 #[derive(Serialize, Clone)]
@@ -102,6 +108,21 @@ struct MsgContent {
     content: String,
 }
 
+/// SSE 流式分片（OpenAI 兼容 data: {...} 行）
+#[derive(Deserialize)]
+struct SseChunk {
+    choices: Vec<SseChoice>,
+}
+#[derive(Deserialize)]
+struct SseChoice {
+    delta: SseDelta,
+}
+#[derive(Deserialize)]
+struct SseDelta {
+    #[serde(default)]
+    content: Option<String>,
+}
+
 impl LlmClient {
     pub fn new(config: LlmConfig) -> Self {
         let http = reqwest::Client::builder()
@@ -122,9 +143,12 @@ impl LlmClient {
             xiangqi_core::types::Color::Black => "black",
         };
 
-        let system = "你是中国象棋引擎。规则要点：红方先行；UCCI 记法为 4 字符（如 h2e2，\
-                     前两字符为起点、后两字符为终点，文件 a-i、行 0-9）。\
-                     你只能输出一步着法，格式为 UCCI，禁止任何解释或多余字符。";
+        let system = concat!(
+            "你是中国象棋引擎，只能输出一步着法。\n",
+            "坐标规则：UCCI 记法为 4 字符，前两字符为起点、后两字符为终点；文件 a-i 从左到右（红方视角），行 0-9 从红方底线到黑方底线。\n",
+            "示例：FEN: rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w，红方最佳着法为 b2e2（炮二平五）。\n",
+            "硬性要求：1) 起点必须是你方棋子所在的格子；2) 整着必须符合中国象棋规则（兵卒只能前进、炮翻山吃子、马蹩脚、车走直线、相/仕不出九宫等）；3) 只能输出一步着法，仅 4 个字符，禁止任何解释、标点或额外文字。"
+        );
         let user = format!("FEN: {fen}\n轮走方: {side}\n请给出最佳着法。");
 
         let first = self
@@ -133,9 +157,12 @@ impl LlmClient {
         match self.legalize(&first, &legal) {
             Ok(mv) => Ok(mv),
             Err(_) => {
-                // 追加提示重试一次（仍非法则返回错误由上层降级）
-                let hint =
-                    format!("你的着法 {first} 非法，请重新输出一个合法着法，仍仅输出 UCCI。");
+                // 二轮纠错：把全部合法着列出，让模型从中选择（大幅提升命中率）
+                let list: Vec<String> = legal.iter().map(|m| m.to_ucci()).collect();
+                let hint = format!(
+                    "你的着法 {first} 非法。以下是从当前局面全部合法着法中挑出的候选，请只从中选择一步并仅输出 4 字符 UCCI：\n{}",
+                    list.join(" ")
+                );
                 let second = self
                     .request(&[
                         msg("system", system),
@@ -167,6 +194,29 @@ impl LlmClient {
         })
     }
 
+    /// 连通性测试：发一个最小 chat 请求，能正常返回即视为可用
+    pub async fn test_connection(&self) -> Result<(), LlmError> {
+        let _ = self.request(&[msg("user", "ping")]).await?;
+        Ok(())
+    }
+
+    /// 同步便捷入口（同 propose_move_sync），供 Tauri 命令调用
+    pub fn test_connection_sync(&self) -> Result<(), LlmError> {
+        let client = self.clone();
+        std::thread::scope(|scope| {
+            scope
+                .spawn(move || {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map_err(|e| LlmError::InvalidConfig(e.to_string()))?;
+                    rt.block_on(client.test_connection())
+                })
+                .join()
+                .map_err(|_| LlmError::InvalidConfig("同步调用线程失败".into()))?
+        })
+    }
+
     async fn request(&self, messages: &[Message]) -> Result<String, LlmError> {
         let url = format!(
             "{}/chat/completions",
@@ -179,7 +229,9 @@ impl LlmClient {
             model: self.config.model.clone(),
             messages: messages.to_vec(),
             temperature: self.config.temperature,
-            max_tokens: 64,
+            max_tokens: 512,
+            stream: true,
+            enable_thinking: Some(false),
         };
         let timeout = Duration::from_secs(self.config.timeout_secs.max(1) as u64);
         let resp = tokio::time::timeout(
@@ -198,13 +250,62 @@ impl LlmClient {
             let text = resp.text().await.unwrap_or_default();
             return Err(LlmError::Status(status.as_u16(), text));
         }
-        let parsed: ChatResponse = resp.json().await?;
-        let content = parsed
-            .choices
-            .into_iter()
-            .next()
-            .map(|c| c.message.content)
-            .ok_or_else(|| LlmError::NoMoveInReply("无 choices".into()))?;
+        // 流式（SSE）与普通 JSON 统一处理
+        let is_sse = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|ct| ct.contains("text/event-stream"))
+            .unwrap_or(false);
+        if is_sse {
+            self.read_sse(resp, timeout).await
+        } else {
+            let parsed: ChatResponse = resp.json().await?;
+            parsed
+                .choices
+                .into_iter()
+                .next()
+                .map(|c| c.message.content)
+                .ok_or_else(|| LlmError::NoMoveInReply("无 choices".into()))
+        }
+    }
+
+    /// 解析 SSE 流（data: {...} 行，[DONE] 结束），拼接 delta.content
+    async fn read_sse(
+        &self,
+        mut resp: reqwest::Response,
+        timeout: Duration,
+    ) -> Result<String, LlmError> {
+        let mut content = String::new();
+        let mut pending = String::new();
+        loop {
+            let chunk = tokio::time::timeout(timeout, resp.chunk())
+                .await
+                .map_err(|_| LlmError::Timeout(self.config.timeout_secs))??;
+            match chunk {
+                None => break,
+                Some(bytes) => {
+                    pending.push_str(&String::from_utf8_lossy(&bytes));
+                    while let Some(pos) = pending.find('\n') {
+                        let line = pending[..pos].trim().to_string();
+                        pending.drain(..=pos);
+                        if let Some(data) = line.strip_prefix("data:") {
+                            let data = data.trim();
+                            if data == "[DONE]" {
+                                return Ok(content);
+                            }
+                            if let Ok(v) = serde_json::from_str::<SseChunk>(data) {
+                                if let Some(c) = v.choices.first() {
+                                    if let Some(d) = &c.delta.content {
+                                        content.push_str(d);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Ok(content)
     }
 

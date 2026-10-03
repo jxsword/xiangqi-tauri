@@ -1,5 +1,6 @@
 //! Tauri 命令层：对局编排（新建/走子/机器走子）、存档（5 槽 + 自动）、大模型配置
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use game_core::engine::{EngineId, EngineManager, EngineOptions};
@@ -14,10 +15,21 @@ use xiangqi_core::types::{Color, Move};
 pub struct AppState {
     /// 当前对局（None = 未开局）
     pub game: Mutex<Option<Game>>,
-    /// 大模型配置（密钥仅存内存 + 本机设置文件）
+    /// 大模型配置（内存镜像；持久化于 app_data_dir/llm-config.json）
     pub llm: Mutex<Option<llm_engine::LlmConfig>>,
     /// 存档存储（app_data_dir/saves）
     pub saves: SaveStore,
+    /// 应用数据目录（llm 配置等持久化；安装目录之外）
+    pub data_dir: PathBuf,
+}
+
+/// LLM 配置文件（应用数据目录内）
+const LLM_CONFIG_FILE: &str = "llm-config.json";
+
+/// 从应用数据目录加载大模型配置（不存在/解析失败返回 None）
+pub fn load_llm_config(data_dir: &std::path::Path) -> Option<llm_engine::LlmConfig> {
+    let json = std::fs::read_to_string(data_dir.join(LLM_CONFIG_FILE)).ok()?;
+    serde_json::from_str(&json).ok()
 }
 
 #[derive(Serialize, Clone)]
@@ -243,9 +255,9 @@ pub fn play_human_move(
     Ok(view)
 }
 
-/// 机器走一步（当前轮方为引擎时）
+/// 机器走一步（当前轮方为引擎时）；async 避免 LLM 请求阻塞 UI 线程
 #[tauri::command]
-pub fn machine_step(state: State<'_, AppState>, think_ms: Option<u64>) -> Result<GameView, String> {
+pub async fn machine_step(state: State<'_, AppState>, think_ms: Option<u64>) -> Result<GameView, String> {
     let mut guard = state.game.lock().unwrap();
     let g = guard.as_mut().ok_or_else(|| "尚未开局".to_string())?;
     let opts = EngineOptions {
@@ -298,17 +310,72 @@ pub fn load_autosave(state: State<'_, AppState>) -> Result<Option<GameView>, Str
     Ok(Some(view))
 }
 
-/// 配置大模型（base_url/api_key/model；timeout_secs 默认 10）
+/// 配置大模型（base_url/api_key/model/timeout_secs）
+/// 持久化到应用数据目录（安装目录之外），下次启动自动恢复；
+/// api_key 留空时保留已保存的密钥（避免误覆盖清空）
 #[tauri::command]
 pub fn set_llm_config(
     state: State<'_, AppState>,
     base_url: String,
     api_key: String,
     model: String,
+    timeout_secs: Option<u32>,
 ) -> Result<(), String> {
-    let cfg = llm_engine::LlmConfig::new(base_url, api_key, model);
+    let key = if api_key.trim().is_empty() {
+        state
+            .llm
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|c| c.api_key.clone())
+            .unwrap_or_default()
+    } else {
+        api_key.trim().to_string()
+    };
+    let mut cfg = llm_engine::LlmConfig::new(base_url.trim(), key, model.trim());
+    cfg.timeout_secs = timeout_secs.unwrap_or(30).max(5);
+    std::fs::create_dir_all(&state.data_dir).map_err(|e| e.to_string())?;
+    let path = state.data_dir.join(LLM_CONFIG_FILE);
+    let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| format!("配置写入失败：{e}"))?;
+    // 密钥文件仅本人可读写
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
     *state.llm.lock().unwrap() = Some(cfg);
     Ok(())
+}
+
+/// 测试大模型连通性（使用传入参数，无需先保存）；async 避免阻塞 UI；
+/// api_key 留空时沿用已保存的密钥（密码框不回填，测试/保存均不回退为空）
+#[tauri::command]
+pub async fn test_llm_config(
+    state: State<'_, AppState>,
+    base_url: String,
+    api_key: String,
+    model: String,
+    timeout_secs: Option<u32>,
+) -> Result<String, String> {
+    let key = if api_key.trim().is_empty() {
+        state
+            .llm
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|c| c.api_key.clone())
+            .unwrap_or_default()
+    } else {
+        api_key.trim().to_string()
+    };
+    let mut cfg = llm_engine::LlmConfig::new(base_url, key, model.clone());
+    cfg.timeout_secs = timeout_secs.unwrap_or(30).max(5);
+    let client = llm_engine::LlmClient::new(cfg);
+    client
+        .test_connection_sync()
+        .map(|_| format!("连接成功：模型 {model} 已正常响应"))
+        .map_err(|e| format!("{e}"))
 }
 
 /// 大模型配置视图（api_key 打码）
