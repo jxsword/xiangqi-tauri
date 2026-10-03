@@ -34,11 +34,24 @@ pub struct GameEvent {
     pub side_to_move: Color,
 }
 
+/// 一步棋的局面对局快照（用于重复局面/长将检测）
+#[derive(Debug, Clone)]
+struct Plv {
+    /// 走完后的局面 FEN
+    fen: String,
+    /// 走出方
+    mover: Color,
+    /// 走出方是否将军（对方被将）
+    check: bool,
+}
+
 /// 对局状态机
 #[derive(Debug, Clone)]
 pub struct Game {
     board: Board,
     moves: Vec<Move>,
+    /// 每步走完后的局面快照（索引 i 对应第 i 着，随 moves 同步增长）
+    plies: Vec<Plv>,
     mode: GameMode,
     red_engine: Option<EngineId>,
     black_engine: Option<EngineId>,
@@ -57,6 +70,7 @@ impl Game {
         Ok(Game {
             board,
             moves: Vec::new(),
+            plies: Vec::new(),
             mode,
             red_engine,
             black_engine,
@@ -128,15 +142,26 @@ impl Game {
                 reason: "该着在当前局面不合法".into(),
             });
         }
+        let mover = self.board.side_to_move;
         self.board = self.board.make_move(mv);
         self.moves.push(mv);
+        // 快照：走出方是否将军 = 对方是否被将
+        self.plies.push(Plv {
+            fen: self.board.to_fen(),
+            mover,
+            check: self.board.is_in_check(mover.opposite()),
+        });
         let status = self.board.game_status();
 
-        let result = match status {
+        // 规则级终局：将死/困毙优先；否则做重复局面/长将检测
+        let mut result = match status {
             GameStatus::Checkmate(winner) => Some(GameResult::Win(winner)),
             GameStatus::Stalemate(loser) => Some(GameResult::Win(loser.opposite())),
             _ => None,
         };
+        if result.is_none() {
+            result = repetition_result(&self.plies);
+        }
         if result.is_some() {
             self.result = result;
         }
@@ -175,5 +200,137 @@ impl Game {
         let outcome = engine.best_move_with_history(&self.board, opts, self.moves())?;
         let event = self.play_move(outcome.mv)?;
         Ok((event, outcome.source, outcome.fallback_reason))
+    }
+}
+
+/// 规则级重复局面检测：
+/// 同一局面完整重现 ≥2 个周期（周期 2..=12 着）时：
+///   - 循环内将军着法来自单一一方 → 该方长将判负；
+///   - 无将军（普通重复）或双方互将军 → 判和。
+/// 返回 None = 未构成可判定的循环。
+fn repetition_result(plies: &[Plv]) -> Option<GameResult> {
+    let n = plies.len();
+    if n < 4 {
+        return None;
+    }
+    for period in (2..=12usize).step_by(2) {
+        if n < 2 * period {
+            break;
+        }
+        if plies[n - 1].fen != plies[n - 1 - period].fen {
+            continue;
+        }
+        // 验证整个周期是真正的循环：与再前一个周期逐着相同
+        let mut cyclic = true;
+        for i in 0..period {
+            if plies[n - 1 - i].fen != plies[n - 1 - period - i].fen {
+                cyclic = false;
+                break;
+            }
+        }
+        if !cyclic {
+            continue;
+        }
+        // 循环内将军模式：将军着法若来自两方 → 相互长将（判和）
+        let mut checkers: Option<Color> = None;
+        let mut mixed = false;
+        for p in &plies[n - 1 - period..n - 1] {
+            if p.check {
+                match checkers {
+                    None => checkers = Some(p.mover),
+                    Some(c) if c == p.mover => {}
+                    _ => mixed = true,
+                }
+            }
+        }
+        if !mixed {
+            if let Some(looser) = checkers {
+                // 单一长将方 → 判负
+                return Some(GameResult::Win(looser.opposite()));
+            }
+        }
+        // 普通重复 / 相互长将 → 和棋
+        return Some(GameResult::Draw);
+    }
+    None
+}
+
+#[cfg(test)]
+mod repetition_tests {
+    use super::*;
+
+    fn plv(fen: &str, mover: Color, check: bool) -> Plv {
+        Plv {
+            fen: fen.into(),
+            mover,
+            check,
+        }
+    }
+
+    #[test]
+    fn repetition_simple_cycle_draw() {
+        // A-B 往返 4 着，无将军 → 和棋
+        let plies = vec![
+            plv("f1", Color::Red, false),
+            plv("f2", Color::Black, false),
+            plv("f1", Color::Red, false),
+            plv("f2", Color::Black, false),
+        ];
+        assert_eq!(repetition_result(&plies), Some(GameResult::Draw));
+    }
+
+    #[test]
+    fn repetition_long_check_loser() {
+        // 红每着将军、黑应将（非将军）→ 红长将判负
+        let plies = vec![
+            plv("f1", Color::Red, true),
+            plv("f2", Color::Black, false),
+            plv("f1", Color::Red, true),
+            plv("f2", Color::Black, false),
+        ];
+        assert_eq!(
+            repetition_result(&plies),
+            Some(GameResult::Win(Color::Black))
+        );
+    }
+
+    #[test]
+    fn repetition_mutual_check_draw() {
+        // 双方互将军 → 和棋
+        let plies = vec![
+            plv("f1", Color::Red, true),
+            plv("f2", Color::Black, true),
+            plv("f1", Color::Red, true),
+            plv("f2", Color::Black, true),
+        ];
+        assert_eq!(repetition_result(&plies), Some(GameResult::Draw));
+    }
+
+    #[test]
+    fn repetition_no_cycle_none() {
+        let plies = vec![plv("f1", Color::Red, false), plv("f2", Color::Black, false)];
+        assert_eq!(repetition_result(&plies), None);
+    }
+
+    #[test]
+    fn repetition_period4_cycle_draw() {
+        // 4 着周期循环（无将军）→ 和棋
+        let plies = vec![
+            plv("f1", Color::Red, false),
+            plv("f2", Color::Black, false),
+            plv("f3", Color::Red, false),
+            plv("f4", Color::Black, false),
+            plv("f1", Color::Red, false),
+            plv("f2", Color::Black, false),
+            plv("f3", Color::Red, false),
+            plv("f4", Color::Black, false),
+        ];
+        assert_eq!(repetition_result(&plies), Some(GameResult::Draw));
+    }
+
+    #[test]
+    fn repetition_not_enough_plies_none() {
+        let plies = vec![plv("f1", Color::Red, false), plv("f2", Color::Black, false), plv("f1", Color::Red, false)];
+        assert_eq!(repetition_result(&plies), None);
     }
 }
