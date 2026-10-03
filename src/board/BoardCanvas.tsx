@@ -15,7 +15,8 @@ const H = MARGIN * 2 + 9 * UNIT; // 816
 const PIECE_R = UNIT * 0.42;
 
 function pieceXY(p: Point) {
-  return { x: MARGIN + p.file * UNIT, y: MARGIN + p.rank * UNIT };
+  // 屏幕行 = 9 - rank：rank0（红方底线）在屏幕最下方，与 FEN/点击坐标一致
+  return { x: MARGIN + p.file * UNIT, y: MARGIN + (9 - p.rank) * UNIT };
 }
 
 interface Props {
@@ -65,11 +66,12 @@ export default function BoardCanvas({ view, onMove }: Props) {
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
     const file = Math.round((x - MARGIN) / UNIT);
-    const rank = Math.round((y - MARGIN) / UNIT);
+    // 屏幕行号 → UCCI rank（上下反转）
+    const rank = 9 - Math.round((y - MARGIN) / UNIT);
     if (file < 0 || file > 8 || rank < 0 || rank > 9) return null;
     // 命中半径内才有效
     const px = MARGIN + file * UNIT;
-    const py = MARGIN + rank * UNIT;
+    const py = MARGIN + (9 - rank) * UNIT;
     if (Math.hypot(x - px, y - py) > PIECE_R + 4) return null;
     return { file, rank };
   };
@@ -85,7 +87,7 @@ export default function BoardCanvas({ view, onMove }: Props) {
       setSelected(null);
       return;
     }
-    const cell = board[p.rank][p.file];
+    const cell = board[9 - p.rank][p.file];
     const myColor = view.sideToMove;
     if (cell && cell.color === myColor) {
       setSelected(p);
@@ -156,10 +158,11 @@ function draw(
 
   // 棋子
   if (board) {
-    for (let rank = 0; rank < 10; rank++) {
+    for (let t = 0; t < 10; t++) {
       for (let file = 0; file < 9; file++) {
-        const cell = board[rank][file];
+        const cell = board[t][file];
         if (!cell) continue;
+        const rank = 9 - t; // UCCI rank（t=0 黑方底线 → rank 9）
         const { x, y } = pieceXY({ file, rank });
         const isSelected = selected && selected.file === file && selected.rank === rank;
         // 棋子底色
@@ -202,7 +205,7 @@ function draw(
       rank: Number(key[1]),
     };
     const { x, y } = pieceXY(to);
-    const targetCell = board?.[to.rank][to.file];
+    const targetCell = board?.[9 - to.rank][to.file];
     if (targetCell) {
       ctx.beginPath();
       ctx.arc(x, y, PIECE_R, 0, Math.PI * 2);
