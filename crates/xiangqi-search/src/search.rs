@@ -69,6 +69,34 @@ impl BuiltinEngine {
             pv: best_move.map(|m| vec![m]).unwrap_or_default(),
         }
     }
+
+    /// 根着法 Top-K 评分（走子方视角，降序，限时 ms；ms=0 不限时）。
+    /// 供大模型引擎参谋制生成候选短名单。
+    pub fn top_moves(&self, board: &Board, k: usize, ms: u64) -> Vec<(Move, i32)> {
+        if k == 0 {
+            return Vec::new();
+        }
+        let started = Instant::now();
+        let deadline = if ms > 0 {
+            Some(started + Duration::from_millis(ms))
+        } else {
+            None
+        };
+        let eval = crate::eval::MaterialPositionEvaluator;
+        let mut searcher = Searcher::new(board, &eval, deadline);
+        let _ = searcher.iterative(self.depth);
+        searcher.root_scores.iter().take(k).copied().collect()
+    }
+
+    /// 单着评估：走完 mv 后以对方走子方视角搜 depth 层，返回**本方**视角评分。
+    /// 供大模型引擎参谋制（gate 护航否决）评估模型所选着法。
+    pub fn evaluate_move(&self, board: &Board, mv: Move, depth: u8) -> i32 {
+        let child = board.make_move(mv);
+        let eval = crate::eval::MaterialPositionEvaluator;
+        let mut searcher = Searcher::new(&child, &eval, None);
+        let (score, _, _, _) = searcher.iterative(depth.max(1));
+        -score // 对方视角取负 = 本方视角
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -87,6 +115,9 @@ struct TTEntry {
 }
 
 struct Searcher<'a> {
+    /// 最近完成迭代层的根着法评分（走子方视角，降序）；供引擎参谋制使用
+    root_scores: Vec<(Move, i32)>,
+
     board: &'a Board,
     eval: &'a dyn Evaluator,
     tt: HashMap<u64, TTEntry>,
@@ -106,6 +137,7 @@ impl<'a> Searcher<'a> {
             nodes: 0,
             deadline,
             stopped: false,
+            root_scores: Vec::new(),
         }
     }
 
@@ -183,6 +215,15 @@ impl<'a> Searcher<'a> {
             last_order = order;
         }
 
+        // 参谋制：收集最近完成层的根着法评分（走子方视角）
+        self.root_scores = {
+            let mut v: Vec<(Move, i32)> = last_scores
+                .iter()
+                .map(|(m, sc)| (*m, *sc))
+                .collect();
+            v.sort_by_key(|(_, sc)| std::cmp::Reverse(*sc));
+            v
+        };
         (best_score, best_move, done_depth, self.nodes)
     }
 

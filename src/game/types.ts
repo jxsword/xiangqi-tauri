@@ -35,6 +35,10 @@ export interface LlmConfigView {
   /** 已配置（打码） */
   apiKeyMasked: string | null;
   timeoutSecs: number;
+  /** 参谋模式：off / candidate / gate */
+  advisor: string;
+  /** 参谋强度 0-100 */
+  blend: number;
 }
 
 export interface EngineOption {

@@ -7,7 +7,7 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 use xiangqi_core::board::Board;
 
 fn client(server: &MockServer) -> LlmClient {
-    LlmClient::new(LlmConfig::new(server.uri(), "test-key", "test-model"))
+    LlmClient::new_no_proxy(LlmConfig::new(server.uri(), "test-key", "test-model"))
 }
 
 fn board() -> Board {
@@ -49,13 +49,13 @@ async fn explanation_tolerated() {
 
 #[tokio::test]
 async fn illegal_then_retry_success() {
-    // 第一轮（无"非法"提示）非法 h8e8；提示重试轮（body 含"非法"）合法 h2e2
+    // 第一轮（无"无效"提示）非法 h8e8；重试轮（body 含"无效"）合法 h2e2
     use wiremock::{Match, Request};
     struct Hint(bool);
     impl Match for Hint {
         fn matches(&self, request: &Request) -> bool {
             let body = String::from_utf8_lossy(&request.body).to_string();
-            body.contains("非法") == self.0
+            body.contains("无效") == self.0
         }
     }
     let s = MockServer::start().await;
@@ -78,18 +78,19 @@ async fn illegal_then_retry_success() {
 
 #[tokio::test]
 async fn illegal_twice_returns_error() {
+    // v2：默认 3 次尝试全部非法 → IllegalMove
     let s = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/chat/completions"))
         .respond_with(ok_body("h8e8"))
-        .expect(2)
+        .expect(3)
         .mount(&s)
         .await;
     let c = client(&s);
     let err = c.propose_move(&board()).await.unwrap_err();
     assert!(
         matches!(err, LlmError::IllegalMove(_)),
-        "两次非法应报非法着：{err}"
+        "三次非法应报非法着：{err}"
     );
 }
 
@@ -145,9 +146,43 @@ async fn connection_refused_returns_http_error() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     drop(listener);
-    let c = LlmClient::new(LlmConfig::new(format!("http://{addr}"), "k", "m"));
+    let c = LlmClient::new_no_proxy(LlmConfig::new(format!("http://{addr}"), "k", "m"));
     let err = c.propose_move(&board()).await.unwrap_err();
     assert!(matches!(err, LlmError::Http(_)), "{err}");
+}
+
+#[tokio::test]
+async fn advised_candidate_prompt_shape() {
+    // candidate 模式：请求体必须包含候选清单标题、分档与两段式输出要求
+    use wiremock::{Match, Request};
+    struct BodyContains(&'static str);
+    impl Match for BodyContains {
+        fn matches(&self, request: &Request) -> bool {
+            String::from_utf8_lossy(&request.body).contains(self.0)
+        }
+    }
+    let s = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .and(BodyContains("候选着法清单"))
+        .and(BodyContains("最佳/均势"))
+        .and(BodyContains("着法: 起点-终点"))
+        .and(BodyContains("【棋盘图】"))
+        .respond_with(ok_body("着法: h2-e2"))
+        .expect(1)
+        .mount(&s)
+        .await;
+    let c = client(&s);
+    let ctx = llm_engine::LlmRequestContext {
+        ascii_board: None,
+        history_ucci: vec!["h2e2".into(), "h9g7".into()],
+        candidate_moves: vec![("h2e2".into(), 12), ("h0g2".into(), -40)],
+        full_legal: vec!["h2e2".into(), "h0g2".into()],
+        veto_reason: None,
+        repetition_warning: None,
+    };
+    let mv = c.propose_move_advised(&board(), &ctx).await.unwrap();
+    assert_eq!(mv.to_ucci(), "h2e2");
 }
 
 #[tokio::test]

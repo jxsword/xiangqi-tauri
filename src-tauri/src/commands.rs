@@ -320,6 +320,8 @@ pub fn set_llm_config(
     api_key: String,
     model: String,
     timeout_secs: Option<u32>,
+    advisor: Option<String>,
+    blend: Option<u8>,
 ) -> Result<(), String> {
     let key = if api_key.trim().is_empty() {
         state
@@ -334,6 +336,13 @@ pub fn set_llm_config(
     };
     let mut cfg = llm_engine::LlmConfig::new(base_url.trim(), key, model.trim());
     cfg.timeout_secs = timeout_secs.unwrap_or(30).max(5);
+    // 参谋模式：off / candidate（默认）/ gate；未知值一律回退 candidate
+    cfg.advisor = match advisor.as_deref() {
+        Some("off") => "off".into(),
+        Some("gate") => "gate".into(),
+        _ => "candidate".into(),
+    };
+    cfg.blend = blend.unwrap_or(60).min(100);
     std::fs::create_dir_all(&state.data_dir).map_err(|e| e.to_string())?;
     let path = state.data_dir.join(LLM_CONFIG_FILE);
     let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
@@ -357,6 +366,8 @@ pub async fn test_llm_config(
     api_key: String,
     model: String,
     timeout_secs: Option<u32>,
+    advisor: Option<String>,
+    blend: Option<u8>,
 ) -> Result<String, String> {
     let key = if api_key.trim().is_empty() {
         state
@@ -371,6 +382,7 @@ pub async fn test_llm_config(
     };
     let mut cfg = llm_engine::LlmConfig::new(base_url, key, model.clone());
     cfg.timeout_secs = timeout_secs.unwrap_or(30).max(5);
+    let _ = (&advisor, &blend); // 测试连通性与参谋参数无关，仅保持前端参数对齐
     let client = llm_engine::LlmClient::new(cfg);
     client
         .test_connection_sync()
@@ -387,6 +399,8 @@ pub struct LlmConfigView {
     /// 已配置（打码显示前 4 位）
     pub api_key_masked: Option<String>,
     pub timeout_secs: u32,
+    pub advisor: String,
+    pub blend: u8,
 }
 
 #[tauri::command]
@@ -396,6 +410,8 @@ pub fn get_llm_config(state: State<'_, AppState>) -> Option<LlmConfigView> {
         model: c.model.clone(),
         api_key_masked: mask_key(&c.api_key),
         timeout_secs: c.timeout_secs,
+        advisor: c.advisor.clone(),
+        blend: c.blend,
     })
 }
 

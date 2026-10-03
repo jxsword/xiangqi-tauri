@@ -129,8 +129,8 @@ export default function App() {
       .catch(showErr);
   };
 
-  const handleSetLlm = async (baseUrl: string, apiKey: string, model: string, timeoutSecs: number) => {
-    await api.setLlmConfig(baseUrl.trim(), apiKey.trim(), model.trim(), timeoutSecs);
+  const handleSetLlm = async (baseUrl: string, apiKey: string, model: string, timeoutSecs: number, advisor: string, blend: number) => {
+    await api.setLlmConfig(baseUrl.trim(), apiKey.trim(), model.trim(), timeoutSecs, advisor, blend);
     setLlmCfg(await api.getLlmConfig());
   };
 
@@ -307,13 +307,15 @@ function LlmPanel({
   onSave,
 }: {
   cfg: LlmConfigView | null;
-  onSave: (baseUrl: string, apiKey: string, model: string, timeoutSecs: number) => Promise<void>;
+  onSave: (baseUrl: string, apiKey: string, model: string, timeoutSecs: number, advisor: string, blend: number) => Promise<void>;
 }) {
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
   const [dirty, setDirty] = useState(false);
   const [timeoutSecs, setTimeoutSecs] = useState(30);
+  const [advisor, setAdvisor] = useState("candidate");
+  const [blend, setBlend] = useState(60);
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
   const showNotice = (kind: "ok" | "err", text: string) => {
@@ -323,7 +325,7 @@ function LlmPanel({
 
   const handleSave = async () => {
     try {
-      await onSave(baseUrl, apiKey, model, timeoutSecs);
+      await onSave(baseUrl, apiKey, model, timeoutSecs, advisor, blend);
       showNotice("ok", "配置已保存（应用数据目录），下次启动自动恢复");
     } catch (e) {
       showNotice("err", `保存失败：${e instanceof Error ? e.message : String(e)}`);
@@ -332,7 +334,7 @@ function LlmPanel({
 
   const handleTest = async () => {
     try {
-      const msg = await api.testLlmConfig(baseUrl.trim(), apiKey.trim(), model.trim(), timeoutSecs);
+      const msg = await api.testLlmConfig(baseUrl.trim(), apiKey.trim(), model.trim(), timeoutSecs, advisor, blend);
       showNotice("ok", msg);
     } catch (e) {
       showNotice("err", `连接失败：${e instanceof Error ? e.message : String(e)}`);
@@ -344,6 +346,8 @@ function LlmPanel({
       setBaseUrl(cfg.baseUrl);
       setModel(cfg.model);
       setTimeoutSecs(cfg.timeoutSecs);
+      setAdvisor(cfg.advisor);
+      setBlend(cfg.blend);
     }
   }, [cfg, dirty]);
 
@@ -392,6 +396,35 @@ function LlmPanel({
           style={inputStyle}
         />
       </label>
+      <label>
+        参谋模式（引擎与大模型配合方式）
+        <select
+          value={advisor}
+          onChange={(e) => {
+            setAdvisor(e.target.value);
+            setDirty(true);
+          }}
+          style={inputStyle}
+        >
+          <option value="off">off：纯大模型（全量合法清单）</option>
+          <option value="candidate">candidate：引擎 Top-K 短名单（推荐）</option>
+          <option value="gate">gate：引擎护航否决</option>
+        </select>
+      </label>
+      <label>
+        参谋强度（0-100，候选模式=短名单条数；护航模式=否决阈值）
+        <input
+          value={blend}
+          onChange={(e) => {
+            setBlend(Math.max(0, Math.min(100, Number(e.target.value) || 60)));
+            setDirty(true);
+          }}
+          type="number"
+          min={0}
+          max={100}
+          style={inputStyle}
+        />
+      </label>
       <button onClick={handleSave} style={btnStyle}>
         保存配置
       </button>{" "}
@@ -410,7 +443,7 @@ function LlmPanel({
         </div>
       )}
       <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
-        超时 10 秒；请求失败/超时/非法着将自动降级为内置引擎
+        空闲超时（两次数据块最大间隔，持续输出不误判）；请求失败/超时/非法着将自动降级为内置引擎；参谋否决时由引擎最佳着法代走
       </div>
     </div>
   );

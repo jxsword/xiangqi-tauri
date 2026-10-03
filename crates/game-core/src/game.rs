@@ -155,7 +155,7 @@ impl Game {
         engine: &mut dyn Engine,
         opts: EngineOptions,
     ) -> Result<GameEvent, GameError> {
-        let outcome = engine.best_move(&self.board, opts)?;
+        let outcome = engine.best_move_with_history(&self.board, opts, self.moves())?;
         self.play_move(outcome.mv)
     }
 
@@ -172,7 +172,7 @@ impl Game {
                 reason: "当前轮到人走，不能由引擎代走".into(),
             })?;
         let mut engine = manager.create(id);
-        let outcome = engine.best_move(&self.board, opts)?;
+        let outcome = engine.best_move_with_history(&self.board, opts, self.moves())?;
         let event = self.play_move(outcome.mv)?;
         Ok((event, outcome.source, outcome.fallback_reason))
     }
