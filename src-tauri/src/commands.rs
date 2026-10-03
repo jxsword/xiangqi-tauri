@@ -61,6 +61,7 @@ impl GameView {
             Some(GameResult::Win(Color::Red)) => ("checkmate".into(), Some("red_win".to_string())),
             Some(GameResult::Win(Color::Black)) => ("checkmate".into(), Some("black_win".to_string())),
             Some(GameResult::Draw) => ("draw".into(), Some("draw".to_string())),
+            Some(GameResult::Aborted) => ("aborted".into(), Some("aborted".to_string())),
             None => ("playing".into(), None),
         };
         let side = match g.side_to_move() {
@@ -270,6 +271,16 @@ pub async fn machine_step(state: State<'_, AppState>, think_ms: Option<u64>) -> 
     view.last_reason = fallback_reason;
     state.saves.autosave(&save_data_from_game(g, "自动存档")).ok();
     Ok(view)
+}
+
+/// 中止对局（前端「停止」按钮）：置为已中止，棋盘锁定；
+/// 自动推进循环由前端停止，本命令只负责对局状态终局化
+#[tauri::command]
+pub fn abort_game(state: State<'_, AppState>) -> Result<GameView, String> {
+    let mut guard = state.game.lock().unwrap();
+    let g = guard.as_mut().ok_or_else(|| "尚未开局".to_string())?;
+    g.abort();
+    Ok(GameView::from_game(g))
 }
 
 /// 存档列表

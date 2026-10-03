@@ -111,6 +111,16 @@ impl Game {
     pub fn result(&self) -> Option<GameResult> {
         self.result
     }
+
+    /// 中止对局（前端「停止」）：仅进行中可中止，返回是否成功
+    pub fn abort(&mut self) -> bool {
+        if self.result.is_none() {
+            self.result = Some(GameResult::Aborted);
+            true
+        } else {
+            false
+        }
+    }
     pub fn side_to_move(&self) -> Color {
         self.board.side_to_move
     }
@@ -332,5 +342,22 @@ mod repetition_tests {
     fn repetition_not_enough_plies_none() {
         let plies = vec![plv("f1", Color::Red, false), plv("f2", Color::Black, false), plv("f1", Color::Red, false)];
         assert_eq!(repetition_result(&plies), None);
+    }
+
+    #[test]
+    fn abort_marks_aborted_and_locks() {
+        let start = Board::start_position().to_fen();
+        let mut g = Game::new(
+            &start,
+            GameMode::HumanVsMachine,
+            None,
+            Some(EngineId::Builtin { depth: 2 }),
+        )
+        .unwrap();
+        assert!(g.abort(), "进行中可中止");
+        assert_eq!(g.result(), Some(GameResult::Aborted));
+        let mv = g.board().legal_moves()[0];
+        assert!(g.play_move(mv).is_err(), "已中止后不可再落子");
+        assert!(!g.abort(), "已中止不可重复中止");
     }
 }

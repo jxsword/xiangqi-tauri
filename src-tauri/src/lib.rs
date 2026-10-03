@@ -34,6 +34,7 @@ pub fn run() {
             commands::set_llm_config,
             commands::get_llm_config,
             commands::test_llm_config,
+            commands::abort_game,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

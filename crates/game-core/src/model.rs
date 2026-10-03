@@ -65,4 +65,6 @@ pub enum GameResult {
     Win(Color),
     /// 和棋
     Draw,
+    /// 对局被中止（前端「停止」按钮）
+    Aborted,
 }

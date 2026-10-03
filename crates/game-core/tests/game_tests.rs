@@ -149,6 +149,7 @@ fn machine_vs_machine_full_game() {
     match result {
         GameResult::Win(c) => assert!(c == Color::Red || c == Color::Black),
         GameResult::Draw => {}
+        GameResult::Aborted => panic!("机器对战不应被中止"),
     }
     // 终局后棋盘状态一致
     let status = g.board().game_status();

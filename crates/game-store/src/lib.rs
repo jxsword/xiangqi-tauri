@@ -180,6 +180,7 @@ fn summarize(data: &SaveData) -> String {
         Some(GameResult::Win(Color::Red)) => "红胜".to_string(),
         Some(GameResult::Win(_)) => "黑胜".to_string(),
         Some(GameResult::Draw) => "和棋".to_string(),
+        Some(GameResult::Aborted) => "已中止".to_string(),
         None => "进行中".to_string(),
     }
 }
