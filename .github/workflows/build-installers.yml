@@ -201,8 +201,8 @@ jobs:
           # 1) 把 dev 标签移动到当前提交
           git tag -f dev HEAD
           git push -f origin dev
-          # 2) 删除旧的 dev Release，避免同名资产冲突
-          old_id=$(gh api "repos/$repo/releases/tags/dev" --jq '.id' 2>/dev/null || true)
+          # 2) 删除旧的 dev Release，避免同名资产冲突（gh release view 错误走 stderr，可安全忽略）
+          old_id=$(gh release view -R "$repo" dev --json id --jq '.id' 2>/dev/null || true)
           if [ -n "$old_id" ]; then
             gh api -X DELETE "repos/$repo/releases/$old_id" >/dev/null
           fi
