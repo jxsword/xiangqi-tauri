@@ -4,10 +4,11 @@
 #   2. 推送 v 开头的 tag（如 v0.1.0）——构建并发布到 GitHub Release
 #   3. 手动触发（Actions 页面点击 Run workflow）
 # 产出：
-#   - windows-latest : NSIS 安装器（-setup.exe）+ xiangqi.exe 裸二进制
-#   - macos-latest   : .app + .dmg + xiangqi 裸二进制（默认 runner 架构；如需 Intel+Apple
-#                      Silicon 通用包，在下方 bundle_args 追加 --target universal-apple-darwin）
-#   - ubuntu-22.04   : .deb + .AppImage + xiangqi 裸二进制
+#   - windows-latest : NSIS 安装器（-setup.exe）+ xiangqi-windows-x86_64.exe 裸二进制
+#   - macos-latest   : .app + .dmg + xiangqi-macos-aarch64 裸二进制（默认 runner 架构；
+#                      如需 Intel+Apple Silicon 通用包，在下方 bundle_args 追加
+#                      --target universal-apple-darwin 并同步调整 binary_name）
+#   - ubuntu-22.04   : .deb + .AppImage + xiangqi-linux-x86_64 裸二进制
 # 缓存策略（体积大 / 安装耗时的部分）：
 #   - npm 依赖        : setup-node cache:npm（已有）
 #   - Rust 编译产物   : swatinem/rust-cache（已有，workspace 根在仓库根 target/）
@@ -41,12 +42,15 @@ jobs:
           - platform: windows-latest
             bundle_args: '--bundles nsis'
             tauri_cache: 'C:\Users\runneradmin\AppData\Local\tauri'
+            binary_name: 'xiangqi-windows-x86_64.exe'
           - platform: macos-latest
             bundle_args: ''
             tauri_cache: '~/.cache/tauri'
+            binary_name: 'xiangqi-macos-aarch64'
           - platform: ubuntu-22.04
             bundle_args: '--bundles deb,appimage'
             tauri_cache: '~/.cache/tauri'
+            binary_name: 'xiangqi-linux-x86_64'
     runs-on: ${{ matrix.platform }}
     steps:
       - name: 检出源码
@@ -142,13 +146,25 @@ jobs:
             target/release/xiangqi
           if-no-files-found: error
 
+      - name: 准备 release 二进制（按平台重命名，避免同名覆盖）
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          if [ -f target/release/xiangqi.exe ]; then
+            cp target/release/xiangqi.exe target/release/${{ matrix.binary_name }}
+          else
+            cp target/release/xiangqi target/release/${{ matrix.binary_name }}
+          fi
+          ls -lh target/release/${{ matrix.binary_name }}
+
       - name: 发布到 GitHub Release（仅 tag 推送时）
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            target/release/xiangqi.exe
-            target/release/xiangqi
+            target/release/xiangqi-windows-x86_64.exe
+            target/release/xiangqi-macos-aarch64
+            target/release/xiangqi-linux-x86_64
             target/release/bundle/nsis/*.exe
             target/release/bundle/dmg/*.dmg
             target/release/bundle/deb/*.deb
