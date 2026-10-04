@@ -189,29 +189,26 @@ jobs:
           path: release-assets
           merge-multiple: true
 
-      - name: 更新 dev 标签并发布开发版 Release
+      - name: 确保 dev 标签存在（仅首次创建，不移动）
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          repo="${{ github.repository }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # 1) 把 dev 标签移动到当前提交
-          git tag -f dev HEAD
-          git push -f origin dev
-          # 2) 删除旧的 dev Release，避免同名资产冲突（gh release view 错误走 stderr，可安全忽略）
-          old_id=$(gh release view -R "$repo" dev --json id --jq '.id' 2>/dev/null || true)
-          if [ -n "$old_id" ]; then
-            gh api -X DELETE "repos/$repo/releases/$old_id" >/dev/null
-          fi
-          # 3) 创建新的开发版 Release 并上传全部产物（排除 macOS 的 .app 目录，其余文件含子目录）
-          assets=$(find release-assets -type f ! -path '*/xiangqi.app/*')
-          gh release create dev \
-            --repo "$repo" \
-            --title "开发版构建（dev）" \
-            --prerelease \
-            --notes "由 main 分支每次成功构建自动更新 · commit ${{ github.sha }}" \
-            $assets
-          gh release view -R "$repo" dev --json assets --jq '.assets[] | .name'
+          git tag dev HEAD 2>/dev/null || true
+          git push origin dev 2>/dev/null || true
+
+      - name: 发布/更新开发版 Release（dev，同名资产自动覆盖）
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: dev
+          name: 开发版构建（dev）
+          prerelease: true
+          body: 由 main 分支每次成功构建自动更新 · commit ${{ github.sha }}
+          files: |
+            release-assets/xiangqi-linux-x86_64
+            release-assets/xiangqi-macos-aarch64
+            release-assets/xiangqi-windows-x86_64.exe
+            release-assets/bundle/nsis/*.exe
+            release-assets/bundle/dmg/*.dmg
+            release-assets/bundle/deb/*.deb
+            release-assets/bundle/appimage/*.AppImage
+          overwrite_files: true
+          fail_on_unmatched_files: false
