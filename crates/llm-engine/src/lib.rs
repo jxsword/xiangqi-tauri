@@ -267,7 +267,7 @@ impl LlmClient {
             .ascii_board
             .clone()
             .unwrap_or_else(|| ascii_board(board));
-        let system = system_v2(side, candidate);
+        let system = system_v2(candidate);
         let base_user = build_user_v2(&fen, side, &ascii, ctx, candidate, board);
 
         let mut last_err: LlmError = LlmError::NoMoveInReply("无回复".into());
@@ -463,7 +463,7 @@ fn msg(role: &str, content: &str) -> Message {
 
 /// system v2：坐标约定 + 白名单约束 + 两段式回复格式。
 /// with_bucket_guide=true 用于候选模式（清单附引擎分档时引导选"最佳/均势"）。
-fn system_v2(side: &str, with_bucket_guide: bool) -> &'static str {
+fn system_v2(with_bucket_guide: bool) -> &'static str {
     if with_bucket_guide {
         concat!(
             "你是中国象棋对弈引擎的着法接口，本局执红方或黑方。\n",
@@ -754,6 +754,7 @@ fn is_sep(c: char) -> bool {
     matches!(c, '-' | '–' | '—' | '~' | '到' | '至')
 }
 
+#[cfg(test)]
 /// 旧版宽松提取（兼容测试）：首个 [a-i][0-9][a-i][0-9] 4 字符子串
 fn extract_ucci(s: &str) -> Option<String> {
     let chars: Vec<char> = s.chars().collect();

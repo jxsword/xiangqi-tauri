@@ -101,14 +101,6 @@ fn engine_id_str(id: EngineId) -> String {
     }
 }
 
-fn engine_config_str(cfg: &EngineConfig) -> String {
-    match cfg.kind {
-        EngineKind::Builtin => format!("builtin:{}", cfg.depth.unwrap_or(3)),
-        EngineKind::Llm => "llm".into(),
-        EngineKind::Pikafish => "pikafish".into(),
-    }
-}
-
 fn engine_config_from_str(s: &str) -> Result<EngineConfig, String> {
     match s {
         "builtin" => Ok(EngineConfig::builtin(3)),
@@ -143,14 +135,6 @@ fn mode_from_str(s: &str) -> Result<GameMode, String> {
         "machine_vs_machine" => Ok(GameMode::MachineVsMachine),
         "human_vs_human" => Ok(GameMode::HumanVsHuman),
         _ => Err(format!("未知模式：{s}")),
-    }
-}
-
-fn mode_str(mode: GameMode) -> String {
-    match mode {
-        GameMode::HumanVsMachine => "human_vs_machine".into(),
-        GameMode::MachineVsMachine => "machine_vs_machine".into(),
-        GameMode::HumanVsHuman => "human_vs_human".into(),
     }
 }
 

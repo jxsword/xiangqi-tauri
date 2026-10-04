@@ -287,8 +287,8 @@ impl LlmEngineAdapter {
     /// gate 否决兜底：采用引擎最佳着法（参谋职责，非模型失败降级）
     fn gate_veto_fallback(
         &self,
-        board: &Board,
-        opts: EngineOptions,
+        _board: &Board,
+        _opts: EngineOptions,
         best_ucci: &str,
         loss: i32,
         vetoed: Move,
