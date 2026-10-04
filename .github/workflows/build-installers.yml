@@ -1,8 +1,9 @@
-# 三平台安装包自动构建（CI）
+# 三平台安装包自动构建（CI + CD）
 # 触发方式：
 #   1. 推送 main 分支 / 提交 pull request —— CI 构建验证
-#   2. 推送 v 开头的 tag（如 v0.1.0）——构建并发布到 GitHub Release
+#   2. 推送 v 开头的 tag（如 v0.1.0）——构建并发布到 GitHub Release（正式版）
 #   3. 手动触发（Actions 页面点击 Run workflow）
+#   4. main 分支每次构建成功 —— 自动更新「开发版」Release（tag: dev，pre-release）
 # 产出：
 #   - windows-latest : NSIS 安装器（-setup.exe）+ xiangqi-windows-x86_64.exe 裸二进制
 #   - macos-latest   : .app + .dmg + xiangqi-macos-aarch64 裸二进制（默认 runner 架构；
@@ -114,6 +115,16 @@ jobs:
       - name: 构建安装包
         run: npm run tauri build -- ${{ matrix.bundle_args }}
 
+      - name: 准备 release 二进制（按平台重命名，避免同名覆盖）
+        shell: bash
+        run: |
+          if [ -f target/release/xiangqi.exe ]; then
+            cp target/release/xiangqi.exe target/release/${{ matrix.binary_name }}
+          else
+            cp target/release/xiangqi target/release/${{ matrix.binary_name }}
+          fi
+          ls -lh target/release/${{ matrix.binary_name }}
+
       - name: 上传构建产物（Windows）
         if: matrix.platform == 'windows-latest'
         uses: actions/upload-artifact@v4
@@ -121,7 +132,7 @@ jobs:
           name: xiangqi-windows
           path: |
             target/release/bundle/nsis/*.exe
-            target/release/xiangqi.exe
+            target/release/${{ matrix.binary_name }}
           if-no-files-found: error
 
       - name: 上传构建产物（macOS）
@@ -132,7 +143,7 @@ jobs:
           path: |
             target/release/bundle/macos/*.app
             target/release/bundle/dmg/*.dmg
-            target/release/xiangqi
+            target/release/${{ matrix.binary_name }}
           if-no-files-found: error
 
       - name: 上传构建产物（Linux）
@@ -143,21 +154,10 @@ jobs:
           path: |
             target/release/bundle/deb/*.deb
             target/release/bundle/appimage/*.AppImage
-            target/release/xiangqi
+            target/release/${{ matrix.binary_name }}
           if-no-files-found: error
 
-      - name: 准备 release 二进制（按平台重命名，避免同名覆盖）
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
-        run: |
-          if [ -f target/release/xiangqi.exe ]; then
-            cp target/release/xiangqi.exe target/release/${{ matrix.binary_name }}
-          else
-            cp target/release/xiangqi target/release/${{ matrix.binary_name }}
-          fi
-          ls -lh target/release/${{ matrix.binary_name }}
-
-      - name: 发布到 GitHub Release（仅 tag 推送时）
+      - name: 发布正式版到 GitHub Release（仅 v* tag 推送时）
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
@@ -171,3 +171,47 @@ jobs:
             target/release/bundle/appimage/*.AppImage
           fail_on_unmatched_files: false
           generate_release_notes: true
+
+  # main 分支每次构建成功后，把三平台产物发布到滚动更新的「开发版」Release（tag: dev）
+  publish-dev:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: 检出源码（用于移动 dev 标签）
+        uses: actions/checkout@v4
+
+      - name: 下载三平台构建产物
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: 更新 dev 标签并发布开发版 Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="${{ github.repository }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 1) 把 dev 标签移动到当前提交
+          git tag -f dev HEAD
+          git push -f origin dev
+          # 2) 删除旧的 dev Release，避免同名资产冲突
+          old_id=$(gh api "repos/$repo/releases/tags/dev" --jq '.id' 2>/dev/null || true)
+          if [ -n "$old_id" ]; then
+            gh api -X DELETE "repos/$repo/releases/$old_id" >/dev/null
+          fi
+          # 3) 创建新的开发版 Release 并上传全部产物（仅顶层文件，不含 .app 目录）
+          assets=$(find release-assets -maxdepth 1 -type f)
+          gh release create dev \
+            --repo "$repo" \
+            --title "开发版构建（dev）" \
+            --prerelease \
+            --notes "由 main 分支每次成功构建自动更新 · commit ${{ github.sha }}" \
+            $assets
+          gh release view -R "$repo" dev --json assets --jq '.assets[] | .name'
