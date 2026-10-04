@@ -206,8 +206,8 @@ jobs:
           if [ -n "$old_id" ]; then
             gh api -X DELETE "repos/$repo/releases/$old_id" >/dev/null
           fi
-          # 3) 创建新的开发版 Release 并上传全部产物（仅顶层文件，不含 .app 目录）
-          assets=$(find release-assets -maxdepth 1 -type f)
+          # 3) 创建新的开发版 Release 并上传全部产物（排除 macOS 的 .app 目录，其余文件含子目录）
+          assets=$(find release-assets -type f ! -path '*/xiangqi.app/*')
           gh release create dev \
             --repo "$repo" \
             --title "开发版构建（dev）" \
